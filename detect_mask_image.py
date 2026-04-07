@@ -5,13 +5,15 @@ from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing.image import img_to_array
 import sys
 import os
+import openpyxl
+from openpyxl.styles import PatternFill, Font
+from datetime import datetime
 
 MODEL_PATH = "mask_detector.h5"
 IMG_SIZE   = 224
 CLASSES    = ["mask_weared_incorrect", "with_mask", "without_mask"]
 COLORS     = {"with_mask": (0, 255, 0), "without_mask": (0, 0, 255), "mask_weared_incorrect": (0, 165, 255)}
 
-# Load model and face detector
 print("[INFO] Loading model...")
 import tensorflow as tf
 model = tf.keras.models.load_model(MODEL_PATH, compile=False)
@@ -53,6 +55,77 @@ for ((x, y, w, h), label, conf) in results:
     cv2.rectangle(image, (x, y), (x+w, y+h), color, 2)
     cv2.putText(image, text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
+# ── Save to Excel with two sides ──────────────────────────
+excel_file = "mask_detection_log.xlsx"
+now = datetime.now()
+
+# Load or create workbook
+if os.path.exists(excel_file):
+    wb = openpyxl.load_workbook(excel_file)
+    ws = wb.active
+else:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Mask Detection Log"
+
+    # ── Headers ──
+    # Left side - Mask Worn
+    ws["A1"] = "MASK WORN"
+    ws["A1"].font = Font(bold=True, color="FFFFFF")
+    ws["A1"].fill = PatternFill("solid", fgColor="008000")  # Green
+    ws.merge_cells("A1:C1")
+
+    ws["A2"] = "Image"
+    ws["B2"] = "Confidence"
+    ws["C2"] = "Date & Time"
+
+    # Right side - No Mask
+    ws["E1"] = "NO MASK / INCORRECT"
+    ws["E1"].font = Font(bold=True, color="FFFFFF")
+    ws["E1"].fill = PatternFill("solid", fgColor="FF0000")  # Red
+    ws.merge_cells("E1:G1")
+
+    ws["E2"] = "Image"
+    ws["F2"] = "Confidence"
+    ws["G2"] = "Date & Time"
+
+    # Column widths
+    for col in ["A", "B", "C", "E", "F", "G"]:
+        ws.column_dimensions[col].width = 20
+
+# Find next empty row for each side
+mask_row = 3
+no_mask_row = 3
+for row in ws.iter_rows(min_row=3):
+    if row[0].value:
+        mask_row += 1
+    if row[4].value:
+        no_mask_row += 1
+
+# ── Write data ────────────────────────────────────────────
+for ((x, y, w, h), label, conf) in results:
+    dt = now.strftime("%Y-%m-%d %H:%M:%S")
+    if label == "with_mask":
+        ws.cell(row=mask_row, column=1).value = img_path
+        ws.cell(row=mask_row, column=2).value = f"{conf*100:.1f}%"
+        ws.cell(row=mask_row, column=3).value = dt
+        ws.cell(row=mask_row, column=1).fill = PatternFill("solid", fgColor="CCFFCC")
+        mask_row += 1
+    else:
+        ws.cell(row=no_mask_row, column=5).value = img_path
+        ws.cell(row=no_mask_row, column=6).value = f"{conf*100:.1f}%"
+        ws.cell(row=no_mask_row, column=7).value = dt
+        ws.cell(row=no_mask_row, column=5).fill = PatternFill("solid", fgColor="FFCCCC")
+        no_mask_row += 1
+
+wb.save(excel_file)
+print(f"[INFO] Results saved to {excel_file}")
+
+# ── Show image ────────────────────────────────────────────
+image = cv2.resize(image, (350, 450))
+cv2.namedWindow("Result", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("Result", 350, 450)
+cv2.moveWindow("Result", 100, 100)
 cv2.imshow("Result", image)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
